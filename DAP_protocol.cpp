@@ -304,7 +304,7 @@ void DAP_Protocol::cmd_transfer_configure() {
 }
 
 void DAP_Protocol::cmd_transfer() {
-    DAP_LOG(LOG_DEBUG, "cmd_transfer()");
+    DAP_LOG(LOG_INFO, "cmd_transfer()");
 
     // Prepare the response. These two bytes
     // will have to be modified before we return...
@@ -334,6 +334,8 @@ void DAP_Protocol::cmd_transfer() {
         transfer_request_t request;
         request.value = request_get_byte();
         verify_write = false;
+
+        DAP_LOG(LOG_INFO, "request: %x", request.value);
 
         // Check if we have a delayed read
         if (posted_read) {
@@ -426,6 +428,8 @@ void DAP_Protocol::cmd_transfer() {
             }
         }
     }
+
+    DAP_LOG(LOG_INFO, "response: %x", response.value);
 
     // Finally update the response count and status
     response_set_byte_at(1, response_count);
@@ -1068,8 +1072,10 @@ transfer_response_t DAP_Protocol::swd_operation(transfer_request_t req, uint32_t
             swd_write(parity(data), 1);
         }
 
-        _hw.swdio_tms_set(false);
-        swj_cycle(_idle_cycles);
+        if (_idle_cycles) {
+            _hw.swd_write(0, 1);
+            swj_cycle(_idle_cycles-1);
+        }
 
     } else if (resp.ack == ack_t::wait ||
                resp.ack == ack_t::fault) {
@@ -1077,18 +1083,17 @@ transfer_response_t DAP_Protocol::swd_operation(transfer_request_t req, uint32_t
             swj_cycle(32 + 1);
 
         swj_cycle(_swd_turnaround);
-
         _hw.swdio_tms_mode_output();
 
         if (_swd_data_phase && !header.read) {
-            _hw.swdio_tms_set(false);
-            swj_cycle(32 + 1);
+            _hw.swd_write(0, 1);
+            swj_cycle(32);
         }
     } else {
         swj_cycle(_swd_turnaround + 32 + 1);
     }
 
-    _hw.swdio_tms_set(true);
+//    _hw.swdio_tms_set(true);
 
     return resp;
 }
@@ -1105,9 +1110,9 @@ void DAP_Protocol::swj_cycle(uint16_t cycles) {
         return;
     }
     while (cycles--) {
-        _hw.swclk_tck_set(false);
-        _hw.delay_edge();
         _hw.swclk_tck_set(true);
+        _hw.delay_edge();
+        _hw.swclk_tck_set(false);
         _hw.delay_edge();
     }
 }
@@ -1174,12 +1179,16 @@ uint32_t DAP_Protocol::swd_read(uint8_t size) {
     uint32_t value = 0;
     uint32_t bit;
     for (uint8_t i = 0; i < size; i++) {
-        _hw.swclk_tck_set(false);
-        _hw.delay_edge();
+
         bit = _hw.swdio_tms_get();
+        value |= (bit << i);
+
         _hw.swclk_tck_set(true);
         _hw.delay_edge();
-        value |= (bit << i);
+
+        _hw.swclk_tck_set(false);
+        _hw.delay_edge();
+
     }
     return value;
 }
@@ -1190,13 +1199,20 @@ void DAP_Protocol::swd_write(uint32_t value, uint8_t size) {
         _hw.swd_write(value, size);
         return;
     }
+
+    _hw.swdio_tms_set(value & 1);
+    value >>= 1;
+    _hw.delay_edge();
+
     for (uint8_t i = 0; i < size; i++) {
-        _hw.swdio_tms_set(value & 1);
-        _hw.swclk_tck_set(false);
-        _hw.delay_edge();
         _hw.swclk_tck_set(true);
         _hw.delay_edge();
+
+        _hw.swdio_tms_set(value & 1);
         value >>= 1;
+
+        _hw.swclk_tck_set(false);
+        _hw.delay_edge();
     }
 }
 

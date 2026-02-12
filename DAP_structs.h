@@ -241,15 +241,6 @@ struct usb_buf_t {
     uint8_t data[TUPP_DEFAULT_PAKET_SIZE] {0};
 };
 
-enum {
-    DAP_TRANSFER_INVALID      = 0,
-    DAP_TRANSFER_OK           = 1 << 0,
-    DAP_TRANSFER_WAIT         = 1 << 1,
-    DAP_TRANSFER_FAULT        = 1 << 2,
-    DAP_TRANSFER_ERROR        = 1 << 3,
-    DAP_TRANSFER_MISMATCH     = 1 << 4,
-};
-
 
 enum {
     SWD_DP_R_IDCODE           = 0x00,
@@ -264,17 +255,6 @@ enum {
     JTAG_IDCODE               = 0x0e,
     JTAG_BYPASS               = 0x0f,
     JTAG_INVALID              = 0xff,
-};
-
-enum {
-    JTAG_SEQUENCE_COUNT       = 0x3f,
-    JTAG_SEQUENCE_TMS         = 0x40,
-    JTAG_SEQUENCE_TDO         = 0x80,
-};
-
-enum {
-    SWD_SEQUENCE_COUNT        = 0x3f,
-    SWD_SEQUENCE_DIN          = 0x80,
 };
 
 //    DAP_TRANSFER_JTAG_ABORT   = 1 << 16,

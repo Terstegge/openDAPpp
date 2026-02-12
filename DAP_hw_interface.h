@@ -37,8 +37,6 @@ public:
     // used at some places in the CMSIS DAP protocol.
     virtual void delay_us(uint32_t us) = 0;
 
-
-
     // CMSIS DAP can use an optional test domain timer.
     // The following methods return the support status,
     // the frequency and the current value of the test
