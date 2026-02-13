@@ -12,11 +12,11 @@
 // ---------------------------------------------
 //
 // This file defines a hardware interface to CMSIS DAP
-// SWD and JTAG functionality. It support simple bit-banging
-// of the single signals as well as providing optional
-// methods for sending/receiving whole sequences of bits.
-// Implementation of these optional methods usually results
-// in better performance of the debug probe.
+// SWD and JTAG functionality. The concrete implementation
+// has to provide some generic (timing) methods as well as
+// basic read/write access to the SWD/JTAG Pins and simple
+// methods to read/write a number of bits or generating
+// clock cycles.
 //
 #ifndef DAP_HW_INTERFACE_H
 #define DAP_HW_INTERFACE_H
@@ -61,27 +61,33 @@ public:
     // into a high-Z state
     virtual void disconnect() = 0;
 
-    /////////////////////////////////////////
-    // Optional SWD / JTAG read write methods
-    /////////////////////////////////////////
+    ////////////////////////////////
+    // SWD / JTAG read write methods
+    ////////////////////////////////
 
     // Method for toggling the SWCLK/TCK line for a
     // certain amount of cycles. Used by SWD and JTAG.
-    // Starting level of the SWCLK/TCK line is HIGH,
-    // so ony cycle is a falling and consecutive rising
-    // edge (using the configured frequency).
-    virtual bool swclk_tck_cycle_support() = 0;
+    // Starting level of the SWCLK/TCK line is LOW,
+    // so ony cycle is a -> HIGH -> LOW transition
+    // (using the configured frequency).
     virtual void swclk_tck_cycle(uint16_t cycles) = 0;
 
-    // Methods for reading/writing up to 32 bits via the
-    // SWD interface. Starting level of SWCLK is HIGH.
-    // SWDIO data is changed on falling clock edges (writing
-    // to target), and sampled on rising edges (reading from
-    // target). The size parameter is the number of bits to
-    // read/write.
-    constexpr virtual bool swd_read_write_support() = 0;
+    // Methods for reading up to 32 bits via the
+    // SWD interface. Starting level of SWCLK is LOW.
+    // SWDIO data is changed by the target on rising clock
+    // edges. The host can read either after the falling
+    // clock edge, or immediately before the next rising
+    // clock edge.
+    // NOTE: The first bit is driven by the target right
+    // at the beginning of this method (Data Phase Shift)!
+    // size is the number of bits to read.
     virtual uint32_t swd_read(uint8_t size) = 0;
-    virtual void     swd_write(uint32_t value, uint8_t size) = 0;
+
+    // Method for writing up to 32 bits via the SWD
+    // interface. The first bit has to be prepared BEFORE
+    // the first rising clock edge (when SWDIO is sampled
+    // by the target). size is the number of bits to write.
+    virtual void swd_write(uint32_t value, uint8_t size) = 0;
 
     // Methods for reading/writing up to 32 bits via the
     // JTAG interface. Starting level of TCK is HIGH.
@@ -91,7 +97,6 @@ public:
     // read/write. The jtag_write method returns the shifted
     // input value (the 'remaining' bits after sending 'size'
     // bits).
-    virtual bool     jtag_read_write_support() = 0;
     virtual uint32_t jtag_read(uint8_t size) = 0;
     virtual uint32_t jtag_write(uint32_t value, uint8_t size) = 0;
     virtual uint32_t jtag_read_write(uint32_t value, uint8_t size) = 0;
@@ -99,15 +104,6 @@ public:
     ///////////////////////////////////////////
     // Direct SWD/JTAG Pin access (bit banging)
     ///////////////////////////////////////////
-
-    // When using bit-banging, this method will wait
-    // the correct amount of time to achieve the needed
-    // frequency of the SWCLK/TCK signal. Because this
-    // method is called after every SWCLK/TCK edge, half
-    // of the period duration of the currently selected
-    // frequency is needed. So when e.g. the frequency is
-    // set to 1MHz, this method would wait approx. 500ns.
-    virtual void delay_edge() = 0;
 
     // SWCLK / TCK Pin
     virtual void swclk_tck_set(bool v) = 0;

@@ -150,7 +150,7 @@ void DAP_Protocol::process_requests() {
 /////////////////////////////
 
 void DAP_Protocol::cmd_info() {
-    DAP_LOG(LOG_INFO, "cmd_info(index: 0x%x)", _request[_request_index]);
+    DAP_LOG(LOG_DEBUG, "cmd_info(index: 0x%x)", _request[_request_index]);
 
     int index = request_get_byte();
     switch(index) {
@@ -247,7 +247,7 @@ void DAP_Protocol::cmd_info() {
 void DAP_Protocol::cmd_host_status() {
     uint8_t type  = request_get_byte();
     uint8_t state = request_get_byte();
-    DAP_LOG(LOG_INFO, "cmd_host_status(type:%d, state:%d)", type, state);
+    DAP_LOG(LOG_DEBUG, "cmd_host_status(type:%d, state:%d)", type, state);
 
     switch(type) {
         case 0: {
@@ -264,7 +264,7 @@ void DAP_Protocol::cmd_host_status() {
 }
 
 void DAP_Protocol::cmd_connect() {
-    DAP_LOG(LOG_INFO, "cmd_connect()");
+    DAP_LOG(LOG_DEBUG, "cmd_connect()");
 
     int port_req = request_get_byte();
     switch(port_req) {
@@ -287,7 +287,7 @@ void DAP_Protocol::cmd_connect() {
 }
 
 void DAP_Protocol::cmd_disconnect() {
-    DAP_LOG(LOG_INFO, "cmd_disconnect()");
+    DAP_LOG(LOG_DEBUG, "cmd_disconnect()");
 
     _hw.disconnect();
     _port = PORT_DEFAULT;
@@ -295,7 +295,7 @@ void DAP_Protocol::cmd_disconnect() {
 }
 
 void DAP_Protocol::cmd_transfer_configure() {
-    DAP_LOG(LOG_INFO, "cmd_transfer_configure()");
+    DAP_LOG(LOG_DEBUG, "cmd_transfer_configure()");
 
     _idle_cycles = request_get_byte();
     _wait_retry  = request_get_short();
@@ -304,7 +304,7 @@ void DAP_Protocol::cmd_transfer_configure() {
 }
 
 void DAP_Protocol::cmd_transfer() {
-    DAP_LOG(LOG_INFO, "cmd_transfer()");
+    DAP_LOG(LOG_DEBUG, "cmd_transfer()");
 
     // Prepare the response. These two bytes
     // will have to be modified before we return...
@@ -335,7 +335,7 @@ void DAP_Protocol::cmd_transfer() {
         request.value = request_get_byte();
         verify_write = false;
 
-        DAP_LOG(LOG_INFO, "request: %x", request.value);
+        DAP_LOG(LOG_DEBUG, "request: %x", request.value);
 
         // Check if we have a delayed read
         if (posted_read) {
@@ -429,7 +429,7 @@ void DAP_Protocol::cmd_transfer() {
         }
     }
 
-    DAP_LOG(LOG_INFO, "response: %x", response.value);
+    DAP_LOG(LOG_DEBUG, "response: %x", response.value);
 
     // Finally update the response count and status
     response_set_byte_at(1, response_count);
@@ -503,7 +503,7 @@ void DAP_Protocol::cmd_transfer_block() {
 }
 
 void DAP_Protocol::cmd_transfer_abort() {
-    DAP_LOG(LOG_INFO, "cmd_transfer_abort()");
+    DAP_LOG(LOG_DEBUG, "cmd_transfer_abort()");
     // This request is handled outside the normal queue.
     // We should never get here.
     response_add_byte(STATUS_OK);
@@ -512,7 +512,7 @@ void DAP_Protocol::cmd_transfer_abort() {
 
 
 void DAP_Protocol::cmd_write_abort() {
-    DAP_LOG(LOG_INFO, "cmd_write_abort()");
+    DAP_LOG(LOG_DEBUG, "cmd_write_abort()");
 
     uint32_t data;
     // Get device and configure it. This is
@@ -534,13 +534,13 @@ void DAP_Protocol::cmd_write_abort() {
 
 void DAP_Protocol::cmd_delay() {
     uint16_t delay = request_get_short();
-    DAP_LOG(LOG_INFO, "cmd_delay(%dus)", delay);
+    DAP_LOG(LOG_DEBUG, "cmd_delay(%dus)", delay);
     _hw.delay_us(delay);
     response_add_byte(STATUS_OK);
 }
 
 void DAP_Protocol::cmd_reset_target() {
-    DAP_LOG(LOG_INFO, "cmd_reset_target()");
+    DAP_LOG(LOG_DEBUG, "cmd_reset_target()");
     response_add_byte(STATUS_OK);
     // bool res = _hw.nRESET_set();
     // DAP_CONFIG_RESET_TARGET_FN();
@@ -553,7 +553,7 @@ void DAP_Protocol::cmd_reset_target() {
 
 
 void DAP_Protocol::cmd_swj_pins() {
-    DAP_LOG(LOG_INFO, "cmd_swj_pins()");
+    DAP_LOG(LOG_DEBUG, "cmd_swj_pins()");
 
     pin_mappings_t value;
     value.value = request_get_byte();
@@ -598,16 +598,17 @@ void DAP_Protocol::cmd_swj_sequence() {
 
     if (size == 0) size = 256;
 
+    _hw.swdio_tms_mode_output();
     while (size) {
         uint8_t sz = (size > 8) ? 8 : size;
-        swd_write(request_get_byte(), sz);
+        _hw.swd_write(request_get_byte(), sz);
         size -= sz;
     }
     response_add_byte(STATUS_OK);
 }
 
 void DAP_Protocol::cmd_swd_configure() {
-    DAP_LOG(LOG_INFO, "cmd_swd_configure()");
+    DAP_LOG(LOG_DEBUG, "cmd_swd_configure()");
 
     swd_config_t config;
     config.value = request_get_byte();
@@ -640,7 +641,7 @@ void DAP_Protocol::cmd_swd_sequence() {
             _hw.swdio_tms_mode_input();
             while (cycles) {
                 int c = (cycles > 8) ? 8 : cycles;
-                uint8_t value = swd_read(c);
+                uint8_t value = _hw.swd_read(c);
                 response_add_byte(value);
                 cycles -= c;
             }
@@ -648,7 +649,7 @@ void DAP_Protocol::cmd_swd_sequence() {
             _hw.swdio_tms_mode_output();
             while (cycles) {
                 int c = (cycles > 8) ? 8 : cycles;
-                swd_write(request_get_byte(), c);
+                _hw.swd_write(request_get_byte(), c);
                 cycles -= c;
             }
         }
@@ -703,10 +704,10 @@ void DAP_Protocol::cmd_jtag_sequence() {
         while (cycles) {
             int c = (cycles > 8) ? 8 : cycles;
             if (info.tdo_capture) {
-                uint8_t value = jtag_read_write(request_get_byte(), c);
+                uint8_t value = _hw.jtag_read_write(request_get_byte(), c);
                 response_add_byte(value);
             } else {
-                jtag_write(request_get_byte(), c);
+                _hw.jtag_write(request_get_byte(), c);
             }
             cycles -= c;
         }
@@ -725,18 +726,18 @@ void DAP_Protocol::cmd_jtag_idcode() {
     jtag_write_ir(JTAG_IDCODE);
 
     _hw.swdio_tms_set(true);
-    swj_cycle(1); // -> Select-DR-Scan
+    _hw.swclk_tck_cycle(1); // -> Select-DR-Scan
     _hw.swdio_tms_set(false);
-    swj_cycle(2 + _jtag_dev_index); // -> Shift-DR
+    _hw.swclk_tck_cycle(2 + _jtag_dev_index); // -> Shift-DR
 
-    data = jtag_read(31);
+    data = _hw.jtag_read(31);
 
     _hw.swdio_tms_set(true);
-    data |= (jtag_read(1) << 31); // -> Exit1-DR
+    data |= (_hw.jtag_read(1) << 31); // -> Exit1-DR
 
-    swj_cycle(1); // -> Update-DR
+    _hw.swclk_tck_cycle(1); // -> Update-DR
     _hw.swdio_tms_set(false);
-    swj_cycle(1); // -> Idle
+    _hw.swclk_tck_cycle(1); // -> Idle
     _hw.tdi_set(true);
 
     response_add_byte(STATUS_OK);
@@ -938,11 +939,11 @@ transfer_response_t DAP_Protocol::jtag_operation(transfer_request_t req, uint32_
     }
 
     _hw.swdio_tms_set(true);
-    swj_cycle(1); // -> Select-DR-Scan
+    _hw.swclk_tck_cycle(1); // -> Select-DR-Scan
     _hw.swdio_tms_set(false);
-    swj_cycle(2 + _jtag_dev_index); // -> Shift-DR
+    _hw.swclk_tck_cycle(2 + _jtag_dev_index); // -> Shift-DR
 
-    resp.value = jtag_read_write(req.value >> 1, 3);
+    resp.value = _hw.jtag_read_write(req.value >> 1, 3);
 
     if (resp.ack == ack_t::wait)
         resp.ack = ack_t::okay; // or FAULT
@@ -957,14 +958,14 @@ transfer_response_t DAP_Protocol::jtag_operation(transfer_request_t req, uint32_
 
         if (req.read) {
             if (cnt) {
-                value = jtag_read(32);
-                swj_cycle(cnt - 1);
+                value = _hw.jtag_read(32);
+                _hw.swclk_tck_cycle(cnt - 1);
                 _hw.swdio_tms_set(true);
-                swj_cycle(1); // -> Exit1-DR
+                _hw.swclk_tck_cycle(1); // -> Exit1-DR
             } else {
-                value = jtag_read(31);
+                value = _hw.jtag_read(31);
                 _hw.swdio_tms_set(true);
-                value |= (jtag_read(1) << 31); // -> Exit1-DR
+                value |= (_hw.jtag_read(1) << 31); // -> Exit1-DR
             }
 
             data = value;
@@ -973,27 +974,27 @@ transfer_response_t DAP_Protocol::jtag_operation(transfer_request_t req, uint32_
             value = data;
 
             if (cnt) {
-                jtag_write(value, 32);
-                swj_cycle(cnt - 1);
+                _hw.jtag_write(value, 32);
+                _hw.swclk_tck_cycle(cnt - 1);
                 _hw.swdio_tms_set(true);
-                swj_cycle(1); // -> Exit1-DR
+                _hw.swclk_tck_cycle(1); // -> Exit1-DR
             } else {
-                value = jtag_write(value, 31);
+                value = _hw.jtag_write(value, 31);
                 _hw.swdio_tms_set(true);
-                jtag_write(value, 1); // -> Exit1-DR
+                _hw.jtag_write(value, 1); // -> Exit1-DR
             }
         }
     } else {// Not OK
         _hw.swdio_tms_set(true);
-        swj_cycle(1); // -> Exit1-DR
+        _hw.swclk_tck_cycle(1); // -> Exit1-DR
     }
 
-    swj_cycle(1); // -> Update-DR
+    _hw.swclk_tck_cycle(1); // -> Update-DR
     _hw.swdio_tms_set(false);
-    swj_cycle(1); // -> Idle
+    _hw.swclk_tck_cycle(1); // -> Idle
     _hw.tdi_set(true);
 
-    swj_cycle(_idle_cycles);
+    _hw.swclk_tck_cycle(_idle_cycles);
 
     return resp;
 }
@@ -1002,31 +1003,31 @@ void DAP_Protocol::jtag_write_ir(int ir) {
     int len = _jtag_ir_length[_jtag_dev_index];
 
     _hw.swdio_tms_set(true);
-    swj_cycle(2); // -> Select-IR-Scan
+    _hw.swclk_tck_cycle(2); // -> Select-IR-Scan
     _hw.swdio_tms_set(false);
-    swj_cycle(2); // -> Shift-IR
+    _hw.swclk_tck_cycle(2); // -> Shift-IR
 
     _hw.tdi_set(true);
-    swj_cycle(_jtag_ir_before[_jtag_dev_index]);
+    _hw.swclk_tck_cycle(_jtag_ir_before[_jtag_dev_index]);
 
-    ir = jtag_write(ir, len - 1);
+    ir = _hw.jtag_write(ir, len - 1);
 
     if (_jtag_ir_after[_jtag_dev_index]) {
-        jtag_write(ir, 1);
+        _hw.jtag_write(ir, 1);
 
         _hw.tdi_set(true);
-        swj_cycle(_jtag_ir_after[_jtag_dev_index] - 1);
+        _hw.swclk_tck_cycle(_jtag_ir_after[_jtag_dev_index] - 1);
 
         _hw.swdio_tms_set(true);
-        swj_cycle(1); // -> Exit1-IR
+        _hw.swclk_tck_cycle(1); // -> Exit1-IR
     } else {
         _hw.swdio_tms_set(true);
-        jtag_write(ir, 1); // -> Exit1-IR
+        _hw.jtag_write(ir, 1); // -> Exit1-IR
     }
 
-    swj_cycle(1); // -> Update-IR
+    _hw.swclk_tck_cycle(1); // -> Update-IR
     _hw.swdio_tms_set(false);
-    swj_cycle(1); // -> Idle
+    _hw.swclk_tck_cycle(1); // -> Idle
     _hw.tdi_set(true);
 }
 
@@ -1040,179 +1041,61 @@ transfer_response_t DAP_Protocol::swd_operation(transfer_request_t req, uint32_t
     header.stop   = 0;
     header.park   = 1;
     header.parity = parity(header.value);
-    swd_write(header.value, 8);
+    _hw.swdio_tms_mode_output();
+    _hw.swd_write(header.value, 8);
 
     // Turnaround
     _hw.swdio_tms_mode_input();
-    swj_cycle(_swd_turnaround);
+    _hw.swclk_tck_cycle(_swd_turnaround);
 
     // Read ACK
     transfer_response_t resp;
-    resp.value = swd_read(3);
+    resp.value = _hw.swd_read(3);
 
     uint32_t value;
     if (resp.ack == ack_t::okay) {
         if (header.read) {
-            value = swd_read(32);
+            value = _hw.swd_read(32);
 
-            if (parity(value) != swd_read(1)) {
+            if (parity(value) != _hw.swd_read(1)) {
                 resp.protocol_error = 1;
                 resp.ack = ack_t::invalid;
             }
 
             data = value;
 
-            swj_cycle(_swd_turnaround);
+            _hw.swclk_tck_cycle(_swd_turnaround);
             _hw.swdio_tms_mode_output();
         } else {
-            swj_cycle(_swd_turnaround);
+            _hw.swclk_tck_cycle(_swd_turnaround);
             _hw.swdio_tms_mode_output();
 
-            swd_write(data, 32);
-            swd_write(parity(data), 1);
+            _hw.swd_write(data, 32);
+            _hw.swd_write(parity(data), 1);
         }
 
         if (_idle_cycles) {
             _hw.swd_write(0, 1);
-            swj_cycle(_idle_cycles-1);
+            _hw.swclk_tck_cycle(_idle_cycles-1);
         }
 
     } else if (resp.ack == ack_t::wait ||
                resp.ack == ack_t::fault) {
         if (_swd_data_phase && header.read)
-            swj_cycle(32 + 1);
+            _hw.swclk_tck_cycle(32 + 1);
 
-        swj_cycle(_swd_turnaround);
+        _hw.swclk_tck_cycle(_swd_turnaround);
         _hw.swdio_tms_mode_output();
 
         if (_swd_data_phase && !header.read) {
             _hw.swd_write(0, 1);
-            swj_cycle(32);
+            _hw.swclk_tck_cycle(32);
         }
     } else {
-        swj_cycle(_swd_turnaround + 32 + 1);
+        _hw.swclk_tck_cycle(_swd_turnaround + 32 + 1);
     }
 
 //    _hw.swdio_tms_set(true);
 
     return resp;
 }
-
-
-
-//////////////////////////
-// Lowest-level HW methods
-//////////////////////////
-
-void DAP_Protocol::swj_cycle(uint16_t cycles) {
-    if (_hw.swclk_tck_cycle_support()) {
-        _hw.swclk_tck_cycle(cycles);
-        return;
-    }
-    while (cycles--) {
-        _hw.swclk_tck_set(true);
-        _hw.delay_edge();
-        _hw.swclk_tck_set(false);
-        _hw.delay_edge();
-    }
-}
-
-// Read 1..32 bits from TDO
-uint32_t DAP_Protocol::jtag_read(uint8_t size) {
-    if (_hw.jtag_read_write_support()) {
-        return _hw.jtag_read(size);
-    }
-    uint32_t value = 0;
-    uint32_t bit;
-    for (uint8_t i = 0; i < size; i++) {
-        _hw.swclk_tck_set(false);
-        _hw.delay_edge();
-        bit = _hw.tdo_get();
-        _hw.swclk_tck_set(true);
-        _hw.delay_edge();
-        value |= (bit << i);
-    }
-    return value;
-}
-
-// Write 1..32 bits to TDI
-uint32_t DAP_Protocol::jtag_write(uint32_t value, uint8_t size) {
-    if (_hw.jtag_read_write_support()) {
-        return _hw.jtag_write(value, size);
-    }
-    for (uint8_t i = 0; i < size; i++) {
-        _hw.tdi_set(value & 1);
-        _hw.swclk_tck_set(false);
-        _hw.delay_edge();
-        _hw.swclk_tck_set(true);
-        _hw.delay_edge();
-        value >>= 1;
-    }
-    return value;
-}
-
-// Read/Write 1..32 bits from TDO/to TDI
-uint32_t DAP_Protocol::jtag_read_write(uint32_t value, uint8_t size) {
-    if (_hw.jtag_read_write_support()) {
-        return _hw.jtag_read_write(value, size);
-    }
-    uint32_t read_value = 0;
-    uint32_t bit;
-    for (uint8_t i = 0; i < size; i++) {
-        _hw.tdi_set(value & 1);
-        _hw.swclk_tck_set(false);
-        _hw.delay_edge();
-        bit = _hw.tdo_get();
-        _hw.swclk_tck_set(true);
-        _hw.delay_edge();
-        value >>= 1;
-        read_value |= (bit << i);
-    }
-    return read_value;
-}
-
-// Read 1..32 bits from SWDIO
-uint32_t DAP_Protocol::swd_read(uint8_t size) {
-    if (_hw.swd_read_write_support()) {
-        return _hw.swd_read(size);
-    }
-    uint32_t value = 0;
-    uint32_t bit;
-    for (uint8_t i = 0; i < size; i++) {
-
-        bit = _hw.swdio_tms_get();
-        value |= (bit << i);
-
-        _hw.swclk_tck_set(true);
-        _hw.delay_edge();
-
-        _hw.swclk_tck_set(false);
-        _hw.delay_edge();
-
-    }
-    return value;
-}
-
-// Write 1..32 bits to SWDIO
-void DAP_Protocol::swd_write(uint32_t value, uint8_t size) {
-    if (_hw.swd_read_write_support()) {
-        _hw.swd_write(value, size);
-        return;
-    }
-
-    _hw.swdio_tms_set(value & 1);
-    value >>= 1;
-    _hw.delay_edge();
-
-    for (uint8_t i = 0; i < size; i++) {
-        _hw.swclk_tck_set(true);
-        _hw.delay_edge();
-
-        _hw.swdio_tms_set(value & 1);
-        value >>= 1;
-
-        _hw.swclk_tck_set(false);
-        _hw.delay_edge();
-    }
-}
-

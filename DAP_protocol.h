@@ -125,27 +125,6 @@ private:
     void                jtag_write_ir(int ir);
     transfer_response_t swd_operation (transfer_request_t req, uint32_t & data);
 
-    //////////////////////////
-    // Lowest-level HW methods
-    //////////////////////////
-
-    // Toggle the SWCLK/TCK line for a number of
-    // cycles (->LOW, -> HIGH). Setting the TDI or
-    // TMS line is not part of this method!
-    void swj_cycle(uint16_t cycles);
-
-    // Read 1..32 bits from TDO. TDO is updated after
-    // the falling clock edge, so perform the following
-    // sequence n times: ->LOW, read TDO, ->HIGH
-    uint32_t jtag_read(uint8_t size);
-
-    // Write 1..32 bits to TDI. TDI is sampled at the
-    // rising clock edge (set TDI, CLK->
-    uint32_t jtag_write     (uint32_t value, uint8_t size);
-    uint32_t jtag_read_write(uint32_t value, uint8_t size);
-    uint32_t swd_read       (uint8_t size);
-    void     swd_write      (uint32_t value, uint8_t size);
-
     /////////////
     // Attributes
     /////////////
