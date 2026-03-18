@@ -1,22 +1,27 @@
-// ---------------------------------------------
-//           This file is part of
-//      _  _   __    _   _    __    __
-//     ( \/ ) /__\  ( )_( )  /__\  (  )
-//      \  / /(__)\  ) _ (  /(__)\  )(__
-//      (__)(__)(__)(_) (_)(__)(__)(____)
+//////////////////////////////////////////////////////
+//   This file is part of openDAP++, a C++ based
+//   implementation of the CMSIS DAP protocol.
+//   https://github.com/Terstegge/openDAPpp.git
 //
-//     Yet Another HW Abstraction Library
-//      Copyright (C) Andreas Terstegge
-//      BSD Licensed (see file LICENSE)
+//   (c) A. Terstegge (Andreas.Terstegge@gmail.com)
+//////////////////////////////////////////////////////
 //
-// ---------------------------------------------
-//
-// This file defines a hardware interface to CMSIS DAP
-// SWD and JTAG functionality. The concrete implementation
-// has to provide some generic (timing) methods as well as
-// basic read/write access to the SWD/JTAG Pins and simple
-// methods to read/write a number of bits or generating
-// clock cycles.
+// This file defines the hardware interface to CMSIS DAP
+// SWD and JTAG functionality. Unlike other libraries,
+// openDAP++ does not use a purely GPIO-based bit-banging
+// interface for the various signals (SWDIO, SWCLK, TDI,
+// TDO, TCK, TMS RESET), but expects the implementation
+// of simple methods to read/write a number of bits or
+// to generate a sequence of clock cycles.
+// These methods make it easier to port the library to
+// other HW layers which use SPI peripherals or embedded
+// coprocessors (like e.g. the PIO units on a RP2040).
+// Still, methods to read/write the several signals also
+// have to be provided because of the DAP_SWJ_PINS command.
+// A delay method also has to be implemented (this is used
+// at some places in the CMSIS DAP protocol).
+// Optionally a test domain timer can be implemented, which
+// is used to time-stamp the SWD/JTAG replies.
 //
 #ifndef DAP_HW_INTERFACE_H
 #define DAP_HW_INTERFACE_H
@@ -26,9 +31,9 @@
 class DAP_hw_interface {
 public:
 
-    ////////////////////////////////
-    // General configuration methods
-    ////////////////////////////////
+    ///////////////////////////////
+    // Timing configuration methods
+    ///////////////////////////////
 
     // Set HW frequency in Hz, which drives the SWCLK/TCK Pin.
     virtual void frequency_set(uint32_t f) = 0;
@@ -61,59 +66,79 @@ public:
     // into a high-Z state
     virtual void disconnect() = 0;
 
-    ////////////////////////////////
-    // SWD / JTAG read write methods
-    ////////////////////////////////
+    ///////////////////////////
+    // Common operation methods
+    ///////////////////////////
 
     // Method for toggling the SWCLK/TCK line for a
     // certain amount of cycles. Used by SWD and JTAG.
     // Starting level of the SWCLK/TCK line is LOW,
-    // so ony cycle is a -> HIGH -> LOW transition
+    // so one cycle is a -> HIGH -> LOW transition
     // (using the configured frequency).
-    virtual void swclk_tck_cycle(uint16_t cycles) = 0;
+    virtual void clock_cycle(uint16_t cycles) = 0;
+
+    /////////////////////////
+    // SWD read write methods
+    /////////////////////////
 
     // Methods for reading up to 32 bits via the
     // SWD interface. Starting level of SWCLK is LOW.
-    // SWDIO data is changed by the target on rising clock
-    // edges. The host can read either after the falling
-    // clock edge, or immediately before the next rising
-    // clock edge.
-    // NOTE: The first bit is driven by the target right
-    // at the beginning of this method (Data Phase Shift)!
-    // size is the number of bits to read.
+    // This method has to make sure that SWDIO is set
+    // to input mode at the beginning!
+    // SWDIO data is changed at the next rising clock
+    // edge, so the first bit has to be read BEFORE the
+    // first clock cycle!
+    // 'size' is the number of bits to be read (1..32);
     virtual uint32_t swd_read(uint8_t size) = 0;
 
-    // Method for writing up to 32 bits via the SWD
-    // interface. The first bit has to be prepared BEFORE
-    // the first rising clock edge (when SWDIO is sampled
-    // by the target). size is the number of bits to write.
+    // Method for writing up to 32 bits via the
+    // SWD interface. Starting level of SWCLK is LOW.
+    // This method has to make sure that SWDIO is set
+    // to output mode at the beginning!
+    // SWDIO data is sampled at the next rising clock
+    // edge, so the first bit has to be prepared BEFORE
+    // the first clock cycle.
+    // 'size' is the number of bits to be written (1..32).
     virtual void swd_write(uint32_t value, uint8_t size) = 0;
 
-    // Methods for reading/writing up to 32 bits via the
-    // JTAG interface. Starting level of TCK is HIGH.
-    // TDI data is changed on falling clock edges (writing
-    // to target), and TDO is sampled on rising edges (reading
-    // from target). The size parameter is the number of bits to
-    // read/write. The jtag_write method returns the shifted
-    // input value (the 'remaining' bits after sending 'size'
-    // bits).
+    // Set the mode (input/output) of the SWDIO line. This
+    // method might be used by swd_read and swd_write.
+    virtual void swd_swdio_enable_output(bool b);
+
+    //////////////////////////
+    // JTAG read write methods
+    //////////////////////////
+
+    // Methods for reading up to 32 bits via the
+    // JTAG interface. Starting level of TCK is LOW.
+    // TDO data is changed at the next rising clock
+    // edge, so the first bit has to be read BEFORE the
+    // first clock cycle!
+    // 'size' is the number of bits to be read (1..32);
     virtual uint32_t jtag_read(uint8_t size) = 0;
+
+    // Method for writing up to 32 bits via the
+    // JTAG interface. Starting level of TCK is LOW.
+    // TDI data is sampled at the next rising clock
+    // edge, so the first bit has to be prepared BEFORE
+    // the first clock cycle.
+    // 'size' is the number of bits to be written (1..32).
     virtual uint32_t jtag_write(uint32_t value, uint8_t size) = 0;
+
+    // Combination of jtag_read and jtag_write (see above).
     virtual uint32_t jtag_read_write(uint32_t value, uint8_t size) = 0;
 
-    ///////////////////////////////////////////
-    // Direct SWD/JTAG Pin access (bit banging)
-    ///////////////////////////////////////////
-
-    // SWCLK / TCK Pin
-    virtual void swclk_tck_set(bool v) = 0;
-    virtual bool swclk_tck_get() = 0;
+    /////////////////////////////
+    // Direct SWD/JTAG Pin access
+    /////////////////////////////
 
     // SWDIO / TMS Pin
     virtual void swdio_tms_set(bool v) = 0;
     virtual bool swdio_tms_get() = 0;
-    virtual void swdio_tms_mode_input() = 0;
-    virtual void swdio_tms_mode_output() = 0;
+
+    // SWCLK / TCK Pin
+    virtual void swclk_tck_set(bool v) = 0;
+    virtual bool swclk_tck_get() = 0;
 
     // TDI Pin
     virtual void tdi_set(bool v) = 0;

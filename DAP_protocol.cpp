@@ -1,9 +1,17 @@
-
+//////////////////////////////////////////////////////
+//   This file is part of openDAP++, a C++ based
+//   implementation of the CMSIS DAP protocol.
+//   https://github.com/Terstegge/openDAPpp.git
 //
-#include <cstring>
-#include <cassert>
+//   (c) A. Terstegge (Andreas.Terstegge@gmail.com)
+//////////////////////////////////////////////////////
+//
+// Implementation of the CMSIS DAP protocol.
+//
 #include "DAP_protocol.h"
 #include "DAP_log.h"
+#include <cstring>
+#include <cassert>
 
 using enum DAP_log::log_level;
 
@@ -64,8 +72,8 @@ bool DAP_Protocol::check_for_transfer_abort(const uint8_t * request) {
     return false;
 }
 
-DAP_Protocol::ret_t DAP_Protocol::process_request(usb_buf_t & request,
-                                                  usb_buf_t & response) {
+ret_t DAP_Protocol::process_request(usb_buf_t & request,
+                                    usb_buf_t & response) {
     DAP_LOG(LOG_DEBUG, "process_request()");
 
     // Initialize buffers
@@ -74,10 +82,10 @@ DAP_Protocol::ret_t DAP_Protocol::process_request(usb_buf_t & request,
     _request_index  = 0;
 
     _response       = response.data;
-    _response_size_max  = sizeof(response.data);
+    _response_size_max = sizeof(response.data);
     _response_index = 0;
 
-    // Rest abort flag
+    // Reset abort flag
     _transfer_abort = false;
 
     // Look at first byte in request without consuming it
@@ -306,10 +314,10 @@ void DAP_Protocol::cmd_transfer_configure() {
 void DAP_Protocol::cmd_transfer() {
     DAP_LOG(LOG_DEBUG, "cmd_transfer()");
 
-    // Prepare the response. These two bytes
-    // will have to be modified before we return...
+    // Prepare the response
     transfer_response_t response;
     response.ack = ack_t::invalid;
+    // These two bytes will have to be modified before we return!
     response_add_byte(0); // Transfer count
     response_add_byte(response.value);
 
@@ -326,35 +334,38 @@ void DAP_Protocol::cmd_transfer() {
     uint32_t data = 0;
 
     // Loop over all transfer requests
+    transfer_request_t request;
     for(response_count=0; response_count < request_count; ++response_count) {
         // Check for abort
         if (_transfer_abort) break;
 
         // Get the next request
-        transfer_request_t request;
         request.value = request_get_byte();
-        verify_write = false;
+        verify_write  = false;
 
-        DAP_LOG(LOG_DEBUG, "request: %x", request.value);
-
-        // Check if we have a delayed read
+        // Check if we have a delayed read: The timestamp is
+        // already written, but the data is only transferred
+        // after the next call to transfer_word!
         if (posted_read) {
             if (needs_posted_read(request)) {
-                // The next request is also delayed...
-                if (request.time_stamp) {
-                    response_add_word(_hw.test_domain_timer_get());
-                }
+                // The next request is also delayed.
+                // Read data from last request, leave posted_read true!
                 response = transfer_word(request, data);
+                response_add_word(data);
+                // Prepare the timestamp for the next request, if needed
+                if (request.time_stamp) {
+                    response_add_word(_timestamp);
+                }
             } else {
-                // Next request is not delayed. Process
-                // the last one and continue with next..
+                // Next request is not delayed. Read data of
+                // the delayed one and fall through to next request
                 response = transfer_word(DP_READ_RDBUFF, data);
+                response_add_word(data);
                 posted_read = false;
             }
             if (response.ack != ack_t::okay) {
                 break;
             }
-            response_add_word(data);
             // Start over if the next request also has a delayed read
             if (posted_read) continue;
         }
@@ -378,6 +389,7 @@ void DAP_Protocol::cmd_transfer() {
                     if (_transfer_abort) break;
                     response = transfer_word(request, data);
                     if ((data & _match_mask) == match_value) {
+                        // Match value is found!
                         value_mismatch = false;
                         break;
                     }
@@ -387,19 +399,23 @@ void DAP_Protocol::cmd_transfer() {
                     break;
                 }
             } else {
+                // Normal read case
                 posted_read = needs_posted_read(request);
                 response = transfer_word(request, data);
                 if (response.ack != ack_t::okay) {
                     break;
                 }
+                // Write the timestamp if needed
                 if (request.time_stamp) {
-                    response_add_word(_hw.test_domain_timer_get());
+                    response_add_word(_timestamp);
                 }
+                // Only write data if read is not delayed
                 if (!posted_read) {
                     response_add_word(data);
                 }
             }
         } else {
+            // Normal write case: Get data to write
             data = request_get_word();
 
             if (request.match_mask) {
@@ -407,16 +423,13 @@ void DAP_Protocol::cmd_transfer() {
                 response.ack = ack_t::okay;
             } else {
                 response = transfer_word(request, data);
-                if (request.time_stamp) {
-                    response_add_word(_hw.test_domain_timer_get());
-                }
                 if (response.ack != ack_t::okay) {
                     break;
                 }
                 verify_write = true;
             }
         }
-    }
+    } // Loop over all transfer requests
 
     if (response.ack == ack_t::okay) {
         // Did we have a delayed read or verify write
@@ -428,8 +441,6 @@ void DAP_Protocol::cmd_transfer() {
             }
         }
     }
-
-    DAP_LOG(LOG_DEBUG, "response: %x", response.value);
 
     // Finally update the response count and status
     response_set_byte_at(1, response_count);
@@ -464,7 +475,6 @@ void DAP_Protocol::cmd_transfer_block() {
 
     uint32_t data;
     if (request.read) {
-
         // If delayed read, read one word extra
         bool needs_posted = needs_posted_read(request);
         if (needs_posted) {
@@ -547,19 +557,14 @@ void DAP_Protocol::cmd_reset_target() {
     response_add_byte(0);
 }
 
-
-
-
-
-
 void DAP_Protocol::cmd_swj_pins() {
     DAP_LOG(LOG_DEBUG, "cmd_swj_pins()");
 
     pin_mappings_t value;
     value.value = request_get_byte();
     pin_mappings_t select;
-    select.value  = request_get_byte();
-    uint32_t wait = request_get_word();
+    select.value = request_get_byte();
+    auto wait    = (int32_t)request_get_word();
 
     if (select.SWCLK_TCK)
         _hw.swclk_tck_set(value.SWCLK_TCK);
@@ -572,7 +577,21 @@ void DAP_Protocol::cmd_swj_pins() {
     if (select.nRESET)
         _hw.reset_set(value.nRESET);
 
-    _hw.delay_us(wait);
+    while(wait > 0) {
+        _hw.delay_us(100);
+        wait -= 100;
+        if (select.SWCLK_TCK && (_hw.swclk_tck_get() != value.SWCLK_TCK))
+            continue;
+        if (select.SWDIO_TMS && (_hw.swdio_tms_get() != value.SWDIO_TMS))
+            continue;
+        if (select.TDI && (_hw.tdi_get() != value.TDI))
+            continue;
+        if (select.nTRST && (_hw.trst_get() != value.nTRST))
+            continue;
+        if (select.nRESET && (_hw.reset_get() != value.nRESET))
+            continue;
+        break;
+    }
 
     pin_mappings_t result;
     result.SWCLK_TCK = _hw.swclk_tck_get();
@@ -598,7 +617,6 @@ void DAP_Protocol::cmd_swj_sequence() {
 
     if (size == 0) size = 256;
 
-    _hw.swdio_tms_mode_output();
     while (size) {
         uint8_t sz = (size > 8) ? 8 : size;
         _hw.swd_write(request_get_byte(), sz);
@@ -630,15 +648,14 @@ void DAP_Protocol::cmd_swd_sequence() {
 
     uint8_t req_count = request_get_byte();
 
+    swd_sequence_info_t info;
     for (uint8_t i= 0; i < req_count; i++) {
-        swd_sequence_info_t info;
         info.value = request_get_byte();
 
         uint8_t cycles = info.cycles;
         if (cycles == 0) cycles = 64;
 
         if (info.read) {
-            _hw.swdio_tms_mode_input();
             while (cycles) {
                 int c = (cycles > 8) ? 8 : cycles;
                 uint8_t value = _hw.swd_read(c);
@@ -646,7 +663,6 @@ void DAP_Protocol::cmd_swd_sequence() {
                 cycles -= c;
             }
         } else {
-            _hw.swdio_tms_mode_output();
             while (cycles) {
                 int c = (cycles > 8) ? 8 : cycles;
                 _hw.swd_write(request_get_byte(), c);
@@ -654,7 +670,6 @@ void DAP_Protocol::cmd_swd_sequence() {
             }
         }
     }
-    _hw.swdio_tms_mode_output();
 }
 
 void DAP_Protocol::cmd_jtag_configure() {
@@ -682,7 +697,7 @@ void DAP_Protocol::cmd_jtag_configure() {
 }
 
 void DAP_Protocol::cmd_jtag_sequence() {
-
+    DAP_LOG(LOG_DEBUG, "jtag_sequence()");
     if (_port != PORT_JTAG){
         response_add_byte(STATUS_ERROR);
         return;
@@ -715,6 +730,7 @@ void DAP_Protocol::cmd_jtag_sequence() {
 }
 
 void DAP_Protocol::cmd_jtag_idcode() {
+    DAP_LOG(LOG_DEBUG, "jtag_idcode()");
     uint32_t data;
 
     if (_port != PORT_JTAG ||
@@ -726,19 +742,17 @@ void DAP_Protocol::cmd_jtag_idcode() {
     jtag_write_ir(JTAG_IDCODE);
 
     _hw.swdio_tms_set(true);
-    _hw.swclk_tck_cycle(1); // -> Select-DR-Scan
+    _hw.clock_cycle(1); // -> Select-DR-Scan
     _hw.swdio_tms_set(false);
-    _hw.swclk_tck_cycle(2 + _jtag_dev_index); // -> Shift-DR
+    _hw.clock_cycle(2 + _jtag_dev_index); // -> Shift-DR, Bypass
 
-    data = _hw.jtag_read(31);
+    data  = _hw.jtag_read(31);
+    data |= _hw.tdo_get() << 31;
 
     _hw.swdio_tms_set(true);
-    data |= (_hw.jtag_read(1) << 31); // -> Exit1-DR
-
-    _hw.swclk_tck_cycle(1); // -> Update-DR
+    _hw.clock_cycle(2); // -> Exit1-DR, -> Update-DR
     _hw.swdio_tms_set(false);
-    _hw.swclk_tck_cycle(1); // -> Idle
-    _hw.tdi_set(true);
+    _hw.clock_cycle(1); // -> Run-Test/Idle
 
     response_add_byte(STATUS_OK);
     response_add_word(data);
@@ -802,15 +816,17 @@ uint8_t DAP_Protocol::request_get_byte() {
 }
 
 uint16_t DAP_Protocol::request_get_short() {
-     return (uint16_t)request_get_byte() |
-           ((uint16_t)request_get_byte() << 8);
+    uint16_t tmp;
+    memcpy(&tmp, &_request[_request_index], sizeof(uint16_t));
+    _request_index += sizeof(uint16_t);
+    return tmp;
 }
 
 uint32_t DAP_Protocol::request_get_word() {
-    return (uint32_t)request_get_byte() |
-          ((uint32_t)request_get_byte() << 8) |
-          ((uint32_t)request_get_byte() << 16) |
-          ((uint32_t)request_get_byte() << 24);
+    uint32_t tmp;
+    memcpy(&tmp, &_request[_request_index], sizeof(uint32_t));
+    _request_index += 4;
+    return tmp;
 }
 
 void DAP_Protocol::response_add_byte(uint8_t value) {
@@ -819,16 +835,14 @@ void DAP_Protocol::response_add_byte(uint8_t value) {
 }
 
 void DAP_Protocol::response_add_short(uint16_t value) {
-    _response[_response_index++] = value;
-    _response[_response_index++] = value >> 8;
+    memcpy(&_response[_response_index], &value, sizeof(uint16_t));
+    _response_index += sizeof(uint16_t);
     assert(_response_index <= _response_size_max);
 }
 
 void DAP_Protocol::response_add_word(uint32_t value) {
-    _response[_response_index++] = value;
-    _response[_response_index++] = value >> 8;
-    _response[_response_index++] = value >> 16;
-    _response[_response_index++] = value >> 24;
+    memcpy(&_response[_response_index], &value, sizeof(uint32_t));
+    _response_index += sizeof(uint32_t);
     assert(_response_index <= _response_size_max);
 }
 
@@ -912,26 +926,20 @@ bool DAP_Protocol::needs_posted_read(transfer_request_t request) {
     return false;
 }
 
-uint32_t DAP_Protocol::parity(uint32_t value) {
-    value ^= value >> 16;
-    value ^= value >> 8;
-    value ^= value >> 4;
-    value &= 0x0f;
-    return (0x6996 >> value) & 1;
-}
-
 //////////////////////////////////////////////////////
 // Second-lowest layer: A single SWD or JTAG operation
 //////////////////////////////////////////////////////
 
 transfer_response_t DAP_Protocol::jtag_operation(transfer_request_t req, uint32_t & data) {
+    DAP_LOG(LOG_DEBUG, "jtag_operation(%x, %x)", req.value, data);
     transfer_response_t resp;
     int ir;
 
-//    if (req._abort_)
-//        ir = JTAG_ABORT;
-//    else
+    if (req.value == DP_WRITE_ABORT.value) {
+        ir = JTAG_ABORT;
+    } else {
         ir = req.access_port ? JTAG_APACC : JTAG_DPACC;
+    }
 
     if (ir != _jtag_ir) {
         _jtag_ir = ir;
@@ -939,15 +947,15 @@ transfer_response_t DAP_Protocol::jtag_operation(transfer_request_t req, uint32_
     }
 
     _hw.swdio_tms_set(true);
-    _hw.swclk_tck_cycle(1); // -> Select-DR-Scan
+    _hw.clock_cycle(1); // -> Select-DR-Scan
     _hw.swdio_tms_set(false);
-    _hw.swclk_tck_cycle(2 + _jtag_dev_index); // -> Shift-DR
+    _hw.clock_cycle(2 + _jtag_dev_index); // -> Shift-DR, bypass
 
     resp.value = _hw.jtag_read_write(req.value >> 1, 3);
 
     if (resp.ack == ack_t::wait)
         resp.ack = ack_t::okay; // or FAULT
-    else if (resp.ack == ack_t::wait)
+    else if (resp.ack == ack_t::okay)
         resp.ack = ack_t::wait;
     else
         resp.ack = ack_t::invalid;
@@ -957,27 +965,25 @@ transfer_response_t DAP_Protocol::jtag_operation(transfer_request_t req, uint32_
         uint32_t value;
 
         if (req.read) {
+
             if (cnt) {
                 value = _hw.jtag_read(32);
-                _hw.swclk_tck_cycle(cnt - 1);
-                _hw.swdio_tms_set(true);
-                _hw.swclk_tck_cycle(1); // -> Exit1-DR
+                _hw.clock_cycle(cnt - 1);
             } else {
-                value = _hw.jtag_read(31);
-                _hw.swdio_tms_set(true);
-                value |= (_hw.jtag_read(1) << 31); // -> Exit1-DR
+                value  = _hw.jtag_read(31);
+                value |= (_hw.tdo_get() << 31);
             }
-
+            _hw.swdio_tms_set(true);
+            _hw.clock_cycle(1); // -> Exit1-DR
             data = value;
-
         } else {
             value = data;
 
             if (cnt) {
                 _hw.jtag_write(value, 32);
-                _hw.swclk_tck_cycle(cnt - 1);
+                _hw.clock_cycle(cnt - 1);
                 _hw.swdio_tms_set(true);
-                _hw.swclk_tck_cycle(1); // -> Exit1-DR
+                _hw.clock_cycle(1); // -> Exit1-DR
             } else {
                 value = _hw.jtag_write(value, 31);
                 _hw.swdio_tms_set(true);
@@ -986,53 +992,54 @@ transfer_response_t DAP_Protocol::jtag_operation(transfer_request_t req, uint32_
         }
     } else {// Not OK
         _hw.swdio_tms_set(true);
-        _hw.swclk_tck_cycle(1); // -> Exit1-DR
+        _hw.clock_cycle(1); // -> Exit1-DR
     }
 
-    _hw.swclk_tck_cycle(1); // -> Update-DR
+    _hw.clock_cycle(1); // -> Update-DR
     _hw.swdio_tms_set(false);
-    _hw.swclk_tck_cycle(1); // -> Idle
-    _hw.tdi_set(true);
+    _hw.clock_cycle(1); // -> Idle
 
-    _hw.swclk_tck_cycle(_idle_cycles);
+    // Get timestamp if necessary
+    if (req.time_stamp) {
+        _timestamp = _hw.test_domain_timer_get();
+    }
+
+    _hw.tdi_set(true);
+    _hw.clock_cycle(_idle_cycles);
 
     return resp;
 }
 
-void DAP_Protocol::jtag_write_ir(int ir) {
+void DAP_Protocol::jtag_write_ir(uint32_t ir) {
+    DAP_LOG(LOG_DEBUG, "jtag_write_ir(%d)", ir);
     int len = _jtag_ir_length[_jtag_dev_index];
 
     _hw.swdio_tms_set(true);
-    _hw.swclk_tck_cycle(2); // -> Select-IR-Scan
+    _hw.clock_cycle(2); // -> Select-IR-Scan
     _hw.swdio_tms_set(false);
-    _hw.swclk_tck_cycle(2); // -> Shift-IR
+    _hw.clock_cycle(2); // -> Shift-IR
 
-    _hw.tdi_set(true);
-    _hw.swclk_tck_cycle(_jtag_ir_before[_jtag_dev_index]);
-
-    ir = _hw.jtag_write(ir, len - 1);
+    _hw.tdi_set(true); // Padding is always 1
+    _hw.clock_cycle(_jtag_ir_before[_jtag_dev_index]);
 
     if (_jtag_ir_after[_jtag_dev_index]) {
-        _hw.jtag_write(ir, 1);
-
-        _hw.tdi_set(true);
-        _hw.swclk_tck_cycle(_jtag_ir_after[_jtag_dev_index] - 1);
-
+        _hw.jtag_write(ir, len);
+        _hw.tdi_set(true); // Padding is always 1
+        _hw.clock_cycle(_jtag_ir_after[_jtag_dev_index] - 1);
         _hw.swdio_tms_set(true);
-        _hw.swclk_tck_cycle(1); // -> Exit1-IR
+        _hw.clock_cycle(1); // -> Exit1-IR
     } else {
+        ir = _hw.jtag_write(ir, len - 1);
         _hw.swdio_tms_set(true);
         _hw.jtag_write(ir, 1); // -> Exit1-IR
     }
 
-    _hw.swclk_tck_cycle(1); // -> Update-IR
+    _hw.clock_cycle(1); // -> Update-IR
     _hw.swdio_tms_set(false);
-    _hw.swclk_tck_cycle(1); // -> Idle
-    _hw.tdi_set(true);
+    _hw.clock_cycle(1); // -> Idle
 }
 
-transfer_response_t DAP_Protocol::swd_operation(transfer_request_t req, uint32_t & data) {
-    // Write header
+transfer_response_t DAP_Protocol::swd_operation(const transfer_request_t & req, uint32_t & data) {
     swd_header_t header;
     // Most bits are the same, but shifted...
     header.value = req.value << 1;
@@ -1041,61 +1048,61 @@ transfer_response_t DAP_Protocol::swd_operation(transfer_request_t req, uint32_t
     header.stop   = 0;
     header.park   = 1;
     header.parity = parity(header.value);
-    _hw.swdio_tms_mode_output();
+    // Write header
     _hw.swd_write(header.value, 8);
 
-    // Turnaround
-    _hw.swdio_tms_mode_input();
-    _hw.swclk_tck_cycle(_swd_turnaround);
-
-    // Read ACK
+    // Turnaround + Read ACK combined in one READ operation
     transfer_response_t resp;
-    resp.value = _hw.swd_read(3);
+    resp.value   = _hw.swd_read(_swd_turnaround + 3);
+    resp.value >>= _swd_turnaround;
 
-    uint32_t value;
+    // Check the response
     if (resp.ack == ack_t::okay) {
+        // Normal read
         if (header.read) {
-            value = _hw.swd_read(32);
-
-            if (parity(value) != _hw.swd_read(1)) {
+            // Get timestamp if necessary. According to the
+            // spec, this should be done immediately after
+            // the ACK-phase.
+            if (req.time_stamp) {
+                _timestamp = _hw.test_domain_timer_get();
+            }
+            // Read the data
+            data = _hw.swd_read(32);
+            // Read parity and turnaround
+            uint32_t par = _hw.swd_read(_swd_turnaround+1) & 1;
+            if (parity(data) != par) {
                 resp.protocol_error = 1;
                 resp.ack = ack_t::invalid;
             }
-
-            data = value;
-
-            _hw.swclk_tck_cycle(_swd_turnaround);
-            _hw.swdio_tms_mode_output();
         } else {
-            _hw.swclk_tck_cycle(_swd_turnaround);
-            _hw.swdio_tms_mode_output();
-
+            // Normal write
+            _hw.clock_cycle(_swd_turnaround);
             _hw.swd_write(data, 32);
             _hw.swd_write(parity(data), 1);
         }
-
+        // Transmit idle cycles if necessary
         if (_idle_cycles) {
             _hw.swd_write(0, 1);
-            _hw.swclk_tck_cycle(_idle_cycles-1);
+            _hw.clock_cycle(_idle_cycles - 1);
         }
-
     } else if (resp.ack == ack_t::wait ||
                resp.ack == ack_t::fault) {
-        if (_swd_data_phase && header.read)
-            _hw.swclk_tck_cycle(32 + 1);
-
-        _hw.swclk_tck_cycle(_swd_turnaround);
-        _hw.swdio_tms_mode_output();
-
+        // Wait or Fault:
+        // Read data anyway if data_phase is enabled
+        if (_swd_data_phase && header.read) {
+            _hw.clock_cycle(32 + 1);
+        }
+        // Do one turnaround in any case!
+        _hw.clock_cycle(_swd_turnaround);
+        // Write data anyway if data_phase is enabled
         if (_swd_data_phase && !header.read) {
             _hw.swd_write(0, 1);
-            _hw.swclk_tck_cycle(32);
+            _hw.clock_cycle(32);
         }
     } else {
-        _hw.swclk_tck_cycle(_swd_turnaround + 32 + 1);
+        // Protocol error:
+        // Back off data phase -> turnaround, read + parity
+        _hw.clock_cycle(_swd_turnaround + 32 + 1);
     }
-
-//    _hw.swdio_tms_set(true);
-
     return resp;
 }

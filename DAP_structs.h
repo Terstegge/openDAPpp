@@ -1,7 +1,11 @@
+//////////////////////////////////////////////////////
+//   This file is part of openDAP++, a C++ based
+//   implementation of the CMSIS DAP protocol.
+//   https://github.com/Terstegge/openDAPpp.git
 //
-// Created by andreas on 07.01.26.
+//   (c) A. Terstegge (Andreas.Terstegge@gmail.com)
+//////////////////////////////////////////////////////
 //
-
 #ifndef DAP_STRUCTS_H
 #define DAP_STRUCTS_H
 
@@ -238,9 +242,15 @@ static_assert(sizeof(swd_header_t) == 1);
 // including the data size.
 struct usb_buf_t {
     uint8_t len {0};
-    uint8_t data[TUPP_DEFAULT_PAKET_SIZE] {0};
+    uint8_t data[USB_DEFAULT_PAKET_SIZE] {0};
 };
 
+// Return type reporting consumed size and the
+// response size.
+struct ret_t {
+    uint16_t request_consumed;
+    uint16_t response_size;
+};
 
 enum {
     SWD_DP_R_IDCODE           = 0x00,

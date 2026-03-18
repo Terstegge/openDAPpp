@@ -1,15 +1,12 @@
-// ---------------------------------------------
-//           This file is part of
-//      _  _   __    _   _    __    __
-//     ( \/ ) /__\  ( )_( )  /__\  (  )
-//      \  / /(__)\  ) _ (  /(__)\  )(__
-//      (__)(__)(__)(_) (_)(__)(__)(____)
+//////////////////////////////////////////////////////
+//   This file is part of openDAP++, a C++ based
+//   implementation of the CMSIS DAP protocol.
+//   https://github.com/Terstegge/openDAPpp.git
 //
-//     Yet Another HW Abstraction Library
-//      Copyright (C) Andreas Terstegge
-//      BSD Licensed (see file LICENSE)
+//   (c) A. Terstegge (Andreas.Terstegge@gmail.com)
+//////////////////////////////////////////////////////
 //
-// ---------------------------------------------
+// Implementation of the CMSIS DAP protocol.
 //
 #ifndef DAP_PROTOCOL_H
 #define DAP_PROTOCOL_H
@@ -25,22 +22,25 @@
 class DAP_Protocol {
 public:
 
+    // The constructor needs the low-level HW implementation
     explicit DAP_Protocol(DAP_hw_interface & hw);
 
+    // Method to check for a transfer abort. The method will
+    // be called by the USB packet handler when a new DAP packet
+    // has arrived.
     bool check_for_transfer_abort(const uint8_t * request);
 
-    struct ret_t {
-        uint16_t request_consumed;
-        uint16_t response_size;
-    };
-
+    // Process a single DAP request
     ret_t process_request(usb_buf_t & request,
                           usb_buf_t & response);
 
+    // Set the serial ID
     inline void set_serial(const char * s) {
         _serial = s;
     }
 
+    // Callback methods for reporting changes in
+    // the connected and running states
     static std::function<void(bool)> connected_cb;
     static std::function<void(bool)> running_cb;
 
@@ -119,47 +119,49 @@ private:
 
     bool needs_posted_read(transfer_request_t request);
 
-    uint32_t parity(uint32_t value);
+    static inline uint32_t parity(uint32_t value) {
+        return __builtin_parity(value);
+    }
 
     transfer_response_t jtag_operation(transfer_request_t req, uint32_t & data);
-    void                jtag_write_ir(int ir);
-    transfer_response_t swd_operation (transfer_request_t req, uint32_t & data);
+    void                jtag_write_ir(uint32_t ir);
+    transfer_response_t swd_operation (const transfer_request_t & req, uint32_t & data);
 
-    /////////////
     // Attributes
-    /////////////
-    std::array<void (DAP_Protocol::*)(), 36> _handlers;
-    const char * _serial {nullptr};
+    std::array<void (DAP_Protocol::*)(), 36> _handlers {nullptr};
+    const char *    _serial {nullptr};
 
     const uint8_t * _request {nullptr};
-    uint16_t    _request_size {0};
-    uint16_t    _request_index {0};
+    uint16_t        _request_size {0};
+    uint16_t        _request_index {0};
 
-    uint8_t *   _response {nullptr};
-    uint16_t    _response_size_max {0};
-    uint16_t    _response_index {0};
+    uint8_t *       _response {nullptr};
+    uint16_t        _response_size_max {0};
+    uint16_t        _response_index {0};
 
-    std::array<uint8_t, 1024> _queue;
-    size_t      _queue_index {0};
+    std::array<uint8_t, 1024> _queue {0};
+    size_t          _queue_index {0};
 
-    port_t      _port {PORT_DEFAULT};
-    volatile bool _transfer_abort {false};
+    port_t          _port {PORT_DEFAULT};
+    volatile bool   _transfer_abort {false};
 
-    uint8_t     _idle_cycles {0};
-    uint16_t    _wait_retry  {100};
-    uint16_t    _match_retry {100};
+    uint8_t         _idle_cycles {0};
+    uint16_t        _wait_retry  {100};
+    uint16_t        _match_retry {100};
 
-    uint32_t    _match_mask {0};
+    uint32_t        _match_mask {0};
 
-    uint8_t     _swd_turnaround {1};
-    bool        _swd_data_phase {false};
+    uint8_t         _swd_turnaround {1};
+    bool            _swd_data_phase {false};
 
-    uint8_t     _jtag_dev_count {0};
-    uint8_t     _jtag_dev_index {0};
-    uint8_t     _jtag_ir_length[JTAG_DEV_COUNT];
-    uint8_t     _jtag_ir_before[JTAG_DEV_COUNT];
-    uint8_t     _jtag_ir_after [JTAG_DEV_COUNT];
-    uint8_t     _jtag_ir {0};
+    uint8_t         _jtag_dev_count {0};
+    uint8_t         _jtag_dev_index {0};
+    uint8_t         _jtag_ir_length[JTAG_DEV_COUNT] {0};
+    uint8_t         _jtag_ir_before[JTAG_DEV_COUNT] {0};
+    uint8_t         _jtag_ir_after [JTAG_DEV_COUNT] {0};
+    uint8_t         _jtag_ir {0};
+
+    uint32_t        _timestamp {0};
 };
 
 #endif // DAP_PROTOCOL_H

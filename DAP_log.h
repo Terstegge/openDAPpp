@@ -1,5 +1,12 @@
-
-// This is a simple logging class to be used within ...
+//////////////////////////////////////////////////////
+//   This file is part of openDAP++, a C++ based
+//   implementation of the CMSIS DAP protocol.
+//   https://github.com/Terstegge/openDAPpp.git
+//
+//   (c) A. Terstegge (Andreas.Terstegge@gmail.com)
+//////////////////////////////////////////////////////
+//
+// This is a simple logging class.
 // The user interface are the two macros defined below:
 //
 //   DAP_LOG(...)  to print a logging message on stdout, and
