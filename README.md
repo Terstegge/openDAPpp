@@ -1,6 +1,6 @@
 # openDAP++
 
-This is a free and open implementation of the CMSIS-DAP debugger firmware
+This is a free and open implementation of the CMSIS-DAP protocol
 written in C++. The Free-DAP library (https://github.com/ataradov/free-dap.git)
 served as a code basis.
 
