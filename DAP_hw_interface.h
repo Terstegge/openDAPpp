@@ -30,6 +30,7 @@
 
 class DAP_hw_interface {
 public:
+    virtual ~DAP_hw_interface() = default;
 
     ///////////////////////////////
     // Timing configuration methods

@@ -119,7 +119,7 @@ private:
 
     bool needs_posted_read(transfer_request_t request);
 
-    static inline uint32_t parity(uint32_t value) {
+    static uint32_t parity(uint32_t value) {
         return __builtin_parity(value);
     }
 
